@@ -17,6 +17,7 @@
     "@fontsource/kaisei-tokumin": "^5.2.8",
     "@fontsource/libre-baskerville": "^5.2.10",
     "@fontsource/playfair-display": "^5.2.8",
+    "@fontsource/playfair-display-sc": "^5.2.8",
     "astro": "^5.1.0",
     "gsap": "^3.12.5"
   },

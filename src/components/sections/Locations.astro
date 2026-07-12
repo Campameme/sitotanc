@@ -9,8 +9,14 @@ import Globe from '../Globe.astro';
 import { locations } from '../../data/locations';
 import { url } from '../../lib/url';
 
-const primaryIndex = locations.findIndex((l) => l.primary);
-const markers = locations.map((l) => ({ lat: l.lat, lng: l.lng }));
+const markers = locations.map((l) => ({
+  lat: l.lat,
+  lng: l.lng,
+  city: l.city,
+  role: l.role,
+  country: l.country,
+  primary: l.primary,
+}));
 ---
 
 <section class="presence" id="sedi">
@@ -24,9 +30,9 @@ const markers = locations.map((l) => ({ lat: l.lat, lng: l.lng }));
     </SectionHead>
 
     <div class="compact-layout" data-reveal>
-      <a href={url('/sedi/')} class="globe-panel" aria-label="Vai alla pagina delle sedi">
-        <Globe id="globe-home" markers={markers} primaryIndex={primaryIndex} interactive={false} />
-      </a>
+      <div class="globe-panel">
+        <Globe markers={markers} centerLat={42} centerLng={22} radius={360} interactive={false} href={url('/sedi/')} label="Globo delle sedi" />
+      </div>
 
       <div class="loc-col">
         <div class="loc-row">
@@ -58,11 +64,7 @@ const markers = locations.map((l) => ({ lat: l.lat, lng: l.lng }));
     gap: 44px;
     align-items: center;
   }
-  .globe-panel {
-    display: block;
-    background: transparent;
-    padding: 0;
-  }
+  .globe-panel { position: relative; }
 
   .loc-row {
     display: flex; flex-wrap: wrap;

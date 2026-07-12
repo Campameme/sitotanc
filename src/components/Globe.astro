@@ -1,200 +1,138 @@
 ---
 /**
- * Globo COBE (WebGL a punti) — vista FISSA centrata sulla porzione
- * Europa + Golfo dove si trovano tutte le sedi. Non ruota da solo.
- * Sfondo trasparente (nessun riquadro): la sfera galleggia sulla
- * sezione. Marker su lat/lng reali; archi dorati dalla direzionale.
- * Se interactive, l'elenco sedi può centrare un punto via __globe.focus.
+ * Globo SVG a proiezione ortografica (d3-geo), calcolato a build-time:
+ * statico, non spostabile, zoomato sulla porzione Europa + Golfo dove
+ * stanno le sedi. Il resto del mondo resta oltre il bordo della sfera
+ * (nascosto). Solo pin cliccabili, nessun collegamento. Stile brand:
+ * disco navy, terre in silhouette, graticola oro tenue, pin oro.
  */
+import { geoOrthographic, geoPath, geoGraticule10, geoDistance } from 'd3-geo';
+import { feature } from 'topojson-client';
+import land110m from 'world-atlas/land-110m.json';
+
 interface Marker {
   lat: number;
   lng: number;
+  city: string;
+  role: string;
+  country: string;
+  primary?: boolean;
 }
 interface Props {
-  id: string;
   markers: Marker[];
-  primaryIndex?: number;
-  interactive?: boolean;
-  /** centro della vista fissa */
   centerLat?: number;
   centerLng?: number;
+  /** raggio della sfera in unità viewBox (zoom) */
+  radius?: number;
+  /** true = pin come bottoni (aprono scheda via JS); altrimenti link a href */
+  interactive?: boolean;
+  href?: string;
   label?: string;
 }
 const {
-  id,
   markers,
-  primaryIndex = -1,
-  interactive = false,
   centerLat = 44,
   centerLng = 17,
+  radius = 300,
+  interactive = false,
+  href = '/sedi/',
   label = 'Globo delle sedi',
 } = Astro.props;
+
+const SIZE = 640;
+const center: [number, number] = [SIZE / 2, SIZE / 2];
+
+const projection = geoOrthographic()
+  .rotate([-centerLng, -centerLat])
+  .scale(radius)
+  .translate(center)
+  .clipAngle(90);
+
+const path = geoPath(projection);
+
+// @ts-expect-error — topojson land object
+const landGeo = feature(land110m, land110m.objects.land);
+const landPath = path(landGeo) ?? '';
+const graticulePath = path(geoGraticule10()) ?? '';
+
+const centerCoord: [number, number] = [centerLng, centerLat];
+
+// posizioni proiettate dei pin (solo lato visibile della sfera)
+const pins = markers
+  .map((m, i) => {
+    const p = projection([m.lng, m.lat]);
+    const visible = p && geoDistance([m.lng, m.lat], centerCoord) < Math.PI / 2;
+    return p && visible ? { ...m, i, x: p[0], y: p[1] } : null;
+  })
+  .filter((p): p is NonNullable<typeof p> => p !== null);
 ---
 
-<div class="globe-wrap">
-  <canvas
-    data-globe
-    id={id}
-    data-markers={JSON.stringify(markers)}
-    data-primary={String(primaryIndex)}
-    data-interactive={String(interactive)}
-    data-center-lat={String(centerLat)}
-    data-center-lng={String(centerLng)}
-    role="img"
-    aria-label={label}
-  ></canvas>
+<div class:list={['globe-svg-wrap', { 'is-interactive': interactive }]}>
+  <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={label} class="globe-svg">
+    <defs>
+      <radialGradient id="globe-sphere" cx="42%" cy="38%" r="72%">
+        <stop offset="0" stop-color="#13284A" />
+        <stop offset="1" stop-color="#0A1322" />
+      </radialGradient>
+    </defs>
+
+    <!-- sfera -->
+    <circle cx={center[0]} cy={center[1]} r={radius} fill="url(#globe-sphere)" stroke="var(--gold)" stroke-width="1" stroke-opacity="0.45" />
+
+    <!-- graticola tenue -->
+    <path d={graticulePath} fill="none" stroke="var(--gold)" stroke-width="0.6" stroke-opacity="0.2" />
+
+    <!-- terre in silhouette -->
+    <path d={landPath} fill="#284C82" fill-opacity="0.95" stroke="var(--gold)" stroke-width="0.5" stroke-opacity="0.4" />
+
+    <!-- pin -->
+    <g class="pins">
+      {pins.map((p) => (
+        <g
+          class:list={['pin', { primary: p.primary }]}
+          transform={`translate(${p.x} ${p.y})`}
+          data-index={String(p.i)}
+          data-city={p.city}
+          data-country={p.country}
+          data-role={p.role}
+          role={interactive ? 'button' : undefined}
+          tabindex={interactive ? '0' : undefined}
+          aria-label={interactive ? `Sede di ${p.city}` : undefined}
+        >
+          <circle class="pin-halo" r="16" />
+          <circle class="pin-dot" r={p.primary ? 6 : 5} />
+          <circle class="pin-core" r="2" />
+          <text class="pin-label" x="0" y="-16" text-anchor="middle">{p.city}</text>
+        </g>
+      ))}
+    </g>
+  </svg>
+
+  {!interactive && <a class="globe-link" href={href} aria-label="Vai alla pagina delle sedi"></a>}
 </div>
 
 <style>
-  .globe-wrap {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1;
-    display: flex; align-items: center; justify-content: center;
+  .globe-svg-wrap { position: relative; width: 100%; }
+  .globe-svg { width: 100%; height: auto; display: block; overflow: hidden; }
+  .globe-link { position: absolute; inset: 0; }
+
+  .pin { }
+  .pin-halo { fill: var(--gold); opacity: 0; transition: opacity 0.35s ease; }
+  .pin-dot { fill: var(--gold); }
+  .pin-core { fill: #0A1322; }
+  .pin.primary .pin-dot { fill: var(--gold-soft); }
+  .pin-label {
+    font-family: var(--sans); font-size: 13px; font-weight: 600;
+    fill: #ECE5D6; letter-spacing: 0.02em; opacity: 0; transition: opacity 0.3s ease;
+    paint-order: stroke; stroke: #0A1322; stroke-width: 3.5px;
+    pointer-events: none;
   }
-  .globe-wrap canvas {
-    width: 100%; height: 100%;
-    background: transparent;
-  }
-  .globe-wrap.is-interactive canvas { cursor: grab; touch-action: pan-y; }
-  .globe-wrap.is-interactive canvas:active { cursor: grabbing; }
+  .pin:hover .pin-halo, .pin.active .pin-halo { opacity: 0.24; }
+  .pin:hover .pin-label, .pin.active .pin-label { opacity: 1; fill: var(--gold-soft); }
+  .pin.active .pin-dot { fill: var(--gold-soft); }
+
+  /* pin interattivi (in /sedi) cliccabili */
+  .is-interactive .pin { cursor: pointer; }
+  .is-interactive .pin:focus-visible { outline: none; }
+  .is-interactive .pin:focus-visible .pin-halo { opacity: 0.32; }
 </style>
-
-<script>
-  import createGlobe from 'cobe';
-
-  const GOLD: [number, number, number] = [0.76, 0.64, 0.36];      // #C2A35B
-  const GOLD_SOFT: [number, number, number] = [0.85, 0.75, 0.52]; // #D8BE84
-  const BASE: [number, number, number] = [0.16, 0.24, 0.42];      // navy dei punti
-  const GLOW: [number, number, number] = [0.09, 0.15, 0.28];      // alone navy discreto
-
-  const locationToAngles = (lat: number, lng: number): [number, number] => [
-    Math.PI - ((lng * Math.PI) / 180 - Math.PI / 2),
-    (lat * Math.PI) / 180,
-  ];
-
-  document.querySelectorAll<HTMLCanvasElement>('[data-globe]').forEach((canvas) => {
-    const markerData: { lat: number; lng: number }[] = JSON.parse(canvas.dataset.markers || '[]');
-    const primaryIdx = parseInt(canvas.dataset.primary || '-1', 10);
-    const interactive = canvas.dataset.interactive === 'true';
-    const centerLat = parseFloat(canvas.dataset.centerLat || '38');
-    const centerLng = parseFloat(canvas.dataset.centerLng || '26');
-    if (interactive) canvas.parentElement?.classList.add('is-interactive');
-
-    const baseMarkers = (active: number) =>
-      markerData.map((m, i) => ({
-        location: [m.lat, m.lng] as [number, number],
-        size: i === active ? 0.1 : i === primaryIdx ? 0.055 : 0.04,
-        color: (i === active ? GOLD_SOFT : GOLD) as [number, number, number],
-      }));
-
-    // archi dalla sede direzionale alle altre
-    const hqI = primaryIdx >= 0 ? primaryIdx : 0;
-    const hq = markerData[hqI];
-    const arcs = hq
-      ? markerData
-          .filter((_, i) => i !== hqI)
-          .map((m) => ({
-            from: [hq.lat, hq.lng] as [number, number],
-            to: [m.lat, m.lng] as [number, number],
-            color: GOLD as [number, number, number],
-          }))
-      : [];
-
-    // vista FISSA centrata sulla porzione con tutte le sedi
-    const [homePhi, homeTheta] = locationToAngles(centerLat, centerLng);
-    let width = 0;
-    let currentPhi = homePhi;
-    let currentTheta = homeTheta;
-    let focusTarget: [number, number] | null = null;
-    let activeIdx = -1;
-    let dragging = false;
-    let pointerStartX = 0;
-    let pointerStartY = 0;
-    let phiAtStart = 0;
-    let thetaAtStart = 0;
-
-    const onResize = () => { width = canvas.offsetWidth; };
-    addEventListener('resize', onResize);
-    onResize();
-
-    const globe = createGlobe(canvas, {
-      devicePixelRatio: 2,
-      width: width * 2,
-      height: width * 2,
-      phi: currentPhi,
-      theta: currentTheta,
-      dark: 1,
-      diffuse: 1.2,
-      mapSamples: 20000,
-      mapBrightness: 5,
-      baseColor: BASE,
-      markerColor: GOLD,
-      glowColor: GLOW,
-      opacity: 0.9,
-      markers: baseMarkers(-1),
-      arcs,
-      arcColor: GOLD,
-      arcWidth: 0.35,
-      arcHeight: 0.32,
-    });
-
-    // COBE ha bisogno di frame per disegnare: loop SENZA rotazione automatica
-    let raf = 0;
-    const tick = () => {
-      if (focusTarget) {
-        const [tPhi, tTheta] = focusTarget;
-        const dPhi = ((tPhi - currentPhi + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-        const dTheta = tTheta - currentTheta;
-        currentPhi += dPhi * 0.09;
-        currentTheta += dTheta * 0.09;
-        if (Math.abs(dPhi) < 0.002 && Math.abs(dTheta) < 0.002) focusTarget = null;
-      }
-      globe.update({
-        phi: currentPhi,
-        theta: currentTheta,
-        markers: baseMarkers(activeIdx),
-        width: width * 2,
-        height: width * 2,
-      });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-
-    if (interactive) {
-      canvas.addEventListener('pointerdown', (e) => {
-        dragging = true;
-        focusTarget = null;
-        pointerStartX = e.clientX;
-        pointerStartY = e.clientY;
-        phiAtStart = currentPhi;
-        thetaAtStart = currentTheta;
-        canvas.setPointerCapture(e.pointerId);
-      });
-      canvas.addEventListener('pointermove', (e) => {
-        if (!dragging) return;
-        currentPhi = phiAtStart + (e.clientX - pointerStartX) / 140;
-        currentTheta = Math.max(-0.6, Math.min(1.1, thetaAtStart + (e.clientY - pointerStartY) / 220));
-      });
-      const endDrag = () => { dragging = false; };
-      canvas.addEventListener('pointerup', endDrag);
-      canvas.addEventListener('pointercancel', endDrag);
-    }
-
-    (canvas as HTMLCanvasElement & { __globe?: unknown }).__globe = {
-      focus(lat: number, lng: number, idx: number) {
-        focusTarget = locationToAngles(lat, lng);
-        activeIdx = idx;
-      },
-      reset() {
-        focusTarget = [homePhi, homeTheta];
-        activeIdx = -1;
-      },
-    };
-
-    addEventListener('pagehide', () => {
-      cancelAnimationFrame(raf);
-      globe.destroy();
-    }, { once: true });
-  });
-</script>

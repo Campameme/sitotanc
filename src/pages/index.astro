@@ -12,6 +12,7 @@ import MentoriaBand from '../components/sections/MentoriaBand.astro';
 import Locations from '../components/sections/Locations.astro';
 import NewsTeaser from '../components/sections/NewsTeaser.astro';
 import CtaBand from '../components/sections/CtaBand.astro';
+import DecoBand from '../components/DecoBand.astro';
 import { site } from '../data/site';
 import { locations } from '../data/locations';
 ---
@@ -57,6 +58,8 @@ import { locations } from '../data/locations';
   <Locations compact={true} />
 
   <NewsTeaser />
+
+  <DecoBand />
 
   <CtaBand
     lead="Un confronto riservato, senza impegno: mettiamo a fuoco insieme il valore da liberare e le mosse da fare."

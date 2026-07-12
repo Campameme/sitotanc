@@ -46,7 +46,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 ---
 
 <!doctype html>
-<html lang="it" data-theme={theme}>
+<html lang="it" data-theme={theme} data-page-theme={theme}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -85,6 +85,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
           if (s && S[s]) {
             el.style.setProperty('--body', S[s]);
             el.style.setProperty('--sans', S[s]);
+          }
+          // Proposta scura globale: "dark" forza il tema; "default" lascia quello di pagina
+          if (localStorage.getItem('fr-theme') === 'dark') {
+            el.setAttribute('data-theme', 'dark');
           }
         } catch (e) {}
       })();

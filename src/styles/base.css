@@ -73,10 +73,13 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 12px;
 }
+/* Firma Art Déco: piccolo rombo oro coerente col logo */
 .eyebrow::before {
   content: "";
-  width: 26px; height: 1px;
-  background: var(--accent);
+  width: 8px; height: 8px;
+  border: 1px solid var(--accent);
+  transform: rotate(45deg);
+  flex: none;
 }
 
 /* Bottoni pill (forma e colore CookGroup: blu su light, oro su dark) */

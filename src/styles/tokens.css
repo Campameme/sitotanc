@@ -74,12 +74,14 @@
   color-scheme: light;
 }
 
-/* ---------- TEMA SCURO — /mentoria: BLU notte + ORO ---------- */
+/* ---------- TEMA SCURO — blu notte profondo + ORO ----------
+   Usato da /mentoria e, via selettore Tema, come proposta scura
+   per l'intero sito. Navy della prima versione (#0A1322). */
 [data-theme="dark"] {
-  --bg: #081A33;
-  --bg-2: #0A2040;
-  --panel: #0F2A50;
-  --panel-2: #0A1D3B;
+  --bg: #0A1322;
+  --bg-2: #0D1A2E;
+  --panel: #101F38;
+  --panel-2: #0C182B;
 
   --ink: #F2EDE1;
   --ink-dim: #D9D4C7;

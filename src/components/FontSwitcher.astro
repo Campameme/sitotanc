@@ -20,9 +20,16 @@ const SECONDARY = [
 
 <div class="font-switch" data-font-switch>
   <button class="fs-toggle" data-fs-toggle aria-expanded="false" aria-controls="fs-panel">
-    <span class="fs-aa">Aa</span> Font
+    <span class="fs-aa">Aa</span> Stile
   </button>
   <div class="fs-panel" id="fs-panel" data-fs-panel hidden>
+    <div class="fs-row">
+      <span class="fs-label">Tema</span>
+      <div class="fs-btns">
+        <button class="fs-btn" data-role="theme" data-key="default">Chiaro (blu)</button>
+        <button class="fs-btn" data-role="theme" data-key="dark">Scuro (blu+oro)</button>
+      </div>
+    </div>
     <div class="fs-row">
       <span class="fs-label">Titoli</span>
       <div class="fs-btns">
@@ -39,7 +46,7 @@ const SECONDARY = [
         ))}
       </div>
     </div>
-    <p class="fs-note">Anteprima — la scelta ti segue tra le pagine.</p>
+    <p class="fs-note">Anteprima — le scelte ti seguono tra le pagine.</p>
   </div>
 </div>
 
@@ -132,26 +139,40 @@ const SECONDARY = [
       if (e.key === 'Escape') setOpen(false);
     });
 
+    // Tema nativo della pagina (non toccato dallo script anti-FOUC), per "Chiaro"
+    const pageTheme = root.getAttribute('data-page-theme') || 'light';
+
     const markActive = () => {
       const p = localStorage.getItem('fr-font-primary') || 'kaisei';
       const s = localStorage.getItem('fr-font-secondary') || 'figtree';
+      const t = localStorage.getItem('fr-theme') || 'default';
       panel.querySelectorAll<HTMLButtonElement>('.fs-btn').forEach((b) => {
         const key = b.dataset.key!;
         const role = b.dataset.role!;
-        b.classList.toggle('active', (role === 'primary' && key === p) || (role === 'secondary' && key === s));
+        b.classList.toggle(
+          'active',
+          (role === 'primary' && key === p) ||
+            (role === 'secondary' && key === s) ||
+            (role === 'theme' && key === t)
+        );
       });
     };
 
     panel.querySelectorAll<HTMLButtonElement>('.fs-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const key = btn.dataset.key!;
-        if (btn.dataset.role === 'primary') {
+        const role = btn.dataset.role!;
+        if (role === 'primary') {
           root.style.setProperty('--disp', P[key]);
           localStorage.setItem('fr-font-primary', key);
-        } else {
+        } else if (role === 'secondary') {
           root.style.setProperty('--body', S[key]);
           root.style.setProperty('--sans', S[key]);
           localStorage.setItem('fr-font-secondary', key);
+        } else if (role === 'theme') {
+          // "Scuro" forza il tema scuro ovunque; "Chiaro" ripristina il default di pagina
+          root.setAttribute('data-theme', key === 'dark' ? 'dark' : pageTheme);
+          localStorage.setItem('fr-theme', key);
         }
         markActive();
       });

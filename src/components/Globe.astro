@@ -1,141 +1,493 @@
 ---
 /**
- * Porzione di globo in prospettiva (d3-geo, calcolata a build-time).
- * NON è una mappa interattiva: è un elemento illustrativo statico. La
- * sfera sfuma verso i bordi (maschera radiale) così da perdersi nello
- * sfondo, senza cornice né riquadro. I punti oro segnano le città; al
- * passaggio del mouse mostrano nome + tipologia della sede (non cliccabili).
+ * Globo "dall'orbita" — scena VETTORIALE calcolata a build-time con la
+ * proiezione satellitare di d3 (vista obliqua ~30° sull'orizzonte, come
+ * una ripresa dalla ISS): orizzonte curvo con airglow oro, terre in
+ * silhouette navy, luci-città dorate generate proceduralmente (seed
+ * deterministico), pin dorati con etichetta sulle sedi. I pin sono
+ * bottoni veri: al click aprono una scheda con tipologia e nota.
+ * Animazioni: ingresso pin via GSAP + ScrollTrigger, luci che
+ * scintillano e alone dei pin in CSS (rispettando reduced-motion).
  */
-import { geoOrthographic, geoPath, geoGraticule10, geoDistance } from 'd3-geo';
-import { feature } from 'topojson-client';
+// @ts-expect-error — d3-geo-projection non distribuisce i tipi
+import { geoSatellite } from 'd3-geo-projection';
+import { geoPath, geoDistance } from 'd3-geo';
+import { feature, mesh } from 'topojson-client';
 import land110m from 'world-atlas/land-110m.json';
+import countries110m from 'world-atlas/countries-110m.json';
+import { url } from '../lib/url';
 
 interface Marker {
   lat: number;
   lng: number;
   city: string;
-  typeLabel?: string;
+  country: string;
+  typeLabel: string;
+  note?: string;
   primary?: boolean;
 }
 interface Props {
   markers: Marker[];
-  centerLat?: number;
-  centerLng?: number;
-  scale?: number;
-  viewW?: number;
-  viewH?: number;
-  offsetX?: number;
-  offsetY?: number;
   label?: string;
 }
-const {
-  markers,
-  centerLat = 44,
-  centerLng = 20,
-  scale = 485,
-  viewW = 560,
-  viewH = 520,
-  offsetX = 0.5,
-  offsetY = 0.5,
-  label = 'Le sedi tra Europa e Golfo',
-} = Astro.props;
+const { markers, label = 'Le sedi viste dall’orbita: Europa e Mediterraneo di notte' } = Astro.props;
 
-const translate: [number, number] = [viewW * offsetX, viewH * offsetY];
+/* ---------- composizione (riferimento: Italia in primo piano,
+     orizzonte curvo in alto, Cracovia/Vilnius verso l'orizzonte) ---------- */
+/* Parametri trovati con un fit numerico sulla composizione del
+   riferimento (tune-globe): camera sopra il Mediterraneo occidentale,
+   vista inclinata verso NE, orizzonte al ~13% dell'altezza. */
+const W = 1000;
+const H = 560;
+const DIST = 1.135;              // distanza camera in raggi terrestri
+const TILT = 25.5;               // inclinazione della vista
+const ROTATE: [number, number, number] = [-7.7, -34.1, 3.8];
+const SCALE = 6847;
+const TX = 290;
+const TY = 1080;
 
-const projection = geoOrthographic()
-  .rotate([-centerLng, -centerLat])
-  .scale(scale)
-  .translate(translate)
-  .clipAngle(90);
+const projection = geoSatellite()
+  .distance(DIST)
+  .rotate(ROTATE)
+  .tilt(TILT)
+  .scale(SCALE)
+  .translate([TX, TY])
+  .clipAngle(Math.acos(1 / DIST) * (180 / Math.PI) - 1e-3)
+  .precision(0.2);
 
 const path = geoPath(projection);
 
+const spherePath = path({ type: 'Sphere' }) ?? '';
 // @ts-expect-error — topojson land object
 const landGeo = feature(land110m, land110m.objects.land);
 const landPath = path(landGeo) ?? '';
-const graticulePath = path(geoGraticule10()) ?? '';
+// @ts-expect-error — topojson countries object
+const bordersGeo = mesh(countries110m, countries110m.objects.countries, (a, b) => a !== b);
+const bordersPath = path(bordersGeo) ?? '';
 
-const centerCoord: [number, number] = [centerLng, centerLat];
+const sphereBounds = path.bounds({ type: 'Sphere' });
+const horizonApexY = sphereBounds[0][1];
 
-// raggio della dissolvenza (la sfera vera è enorme: qui definiamo dove sfuma)
-const fadeR = Math.min(viewW, viewH) * 0.58;
+/* ---------- visibilità sul lato illuminato della calotta ---------- */
+const horizonAngle = Math.acos(1 / DIST);
+const center: [number, number] = [-ROTATE[0], -ROTATE[1]];
+const onCap = (lng: number, lat: number) =>
+  geoDistance([lng, lat], center) < horizonAngle - 0.01;
 
-const dots = markers
-  .map((m, i) => {
+/* ---------- PRNG deterministico (build stabile) ---------- */
+const mulberry32 = (seed: number) => () => {
+  seed |= 0;
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const rnd = mulberry32(20260719);
+
+/* ---------- luci-città (lat, lng, peso 1-5) ---------- */
+const CITIES: [number, number, number][] = [
+  // Italia
+  [45.07, 7.69, 4], [45.46, 9.19, 5], [44.41, 8.93, 3], [45.44, 12.34, 3],
+  [45.44, 10.99, 2], [44.49, 11.34, 3], [43.77, 11.26, 3], [41.9, 12.5, 5],
+  [40.85, 14.27, 4], [41.13, 16.87, 3], [38.12, 13.36, 3], [37.5, 15.09, 3],
+  [39.22, 9.12, 2], [45.65, 13.77, 2], [44.06, 12.57, 2], [42.46, 14.21, 2],
+  [40.47, 17.24, 2], [38.11, 15.65, 2], [40.68, 14.77, 2], [43.55, 10.31, 2],
+  [44.1, 9.82, 1], [43.82, 7.78, 1], [40.92, 9.5, 1], [38.19, 15.55, 2],
+  [43.62, 13.51, 2], [45.41, 11.88, 2], [45.54, 10.21, 2], [44.8, 10.33, 1],
+  [43.11, 12.39, 1], [41.46, 15.54, 1], [40.35, 18.17, 1],
+  // Francia · Monaco
+  [43.7, 7.27, 3], [43.3, 5.37, 4], [43.12, 5.93, 2], [43.61, 3.88, 2],
+  [45.76, 4.84, 4], [45.19, 5.72, 2], [48.86, 2.35, 5], [48.57, 7.75, 2],
+  [47.32, 5.04, 1], [43.6, 1.44, 3], [42.7, 2.9, 1], [41.93, 8.74, 1],
+  [42.7, 9.45, 1], [43.74, 7.42, 2],
+  // Spagna
+  [41.39, 2.17, 5], [39.47, -0.38, 3], [39.57, 2.65, 2], [40.42, -3.7, 4],
+  [41.65, -0.88, 2], [38.35, -0.48, 2], [41.98, 2.82, 1],
+  // Svizzera · Austria · Germania · Cechia
+  [46.2, 6.14, 2], [47.37, 8.54, 3], [46.95, 7.45, 1], [47.56, 7.59, 2],
+  [47.27, 11.4, 1], [47.81, 13.05, 1], [48.21, 16.37, 4], [47.07, 15.44, 2],
+  [48.14, 11.58, 4], [48.78, 9.18, 3], [49.45, 11.08, 2], [50.11, 8.68, 3],
+  [50.08, 14.44, 3], [49.2, 16.61, 2],
+  // Polonia · Baltico · Est
+  [50.06, 19.94, 4], [50.26, 19.02, 3], [52.23, 21.01, 5], [51.76, 19.46, 2],
+  [51.11, 17.03, 2], [54.35, 18.65, 2], [52.41, 16.93, 2], [54.69, 25.28, 3],
+  [54.9, 23.9, 2], [56.95, 24.11, 3], [53.9, 27.57, 3], [49.84, 24.03, 2],
+  [48.15, 17.11, 2], [47.5, 19.04, 4], [47.53, 21.62, 1], [48.72, 21.26, 1],
+  // Balcani · Grecia · Turchia
+  [46.06, 14.51, 1], [45.81, 15.98, 2], [45.33, 14.44, 1], [43.51, 16.44, 1],
+  [43.86, 18.41, 1], [44.79, 20.45, 3], [45.25, 19.85, 1], [42.7, 23.32, 2],
+  [41.99, 21.43, 1], [41.33, 19.82, 2], [42.44, 19.26, 1], [40.64, 22.94, 2],
+  [37.98, 23.73, 4], [38.25, 21.73, 1], [44.43, 26.1, 3], [46.77, 23.6, 1],
+  [45.76, 21.23, 1], [41.01, 28.98, 5], [38.42, 27.14, 2],
+  // Nordafrica · Malta
+  [36.81, 10.18, 3], [36.75, 3.06, 3], [35.7, -0.63, 2], [36.9, 7.77, 1],
+  [32.89, 13.19, 2], [35.9, 14.51, 1],
+];
+
+interface Light { x: number; y: number; r: number; o: number; tw: boolean; dl: number; dur: number }
+const lights: Light[] = [];
+for (const [lat, lng, w] of CITIES) {
+  const spread = 0.1 + w * 0.05;
+  const pts = 3 + w * 3;
+  for (let i = 0; i <= pts; i++) {
+    // i=0 → nucleo della città, poi il pulviscolo intorno
+    const jl = i === 0 ? lng : lng + (rnd() * 2 - 1) * spread * 1.7;
+    const jf = i === 0 ? lat : lat + (rnd() * 2 - 1) * spread;
+    if (!onCap(jl, jf)) continue;
+    const p = projection([jl, jf]);
+    if (!p) continue;
+    const [x, y] = p as [number, number];
+    if (x < -8 || x > W + 8 || y < -8 || y > H + 8) continue;
+    const depth = 0.42 + 0.78 * (y / H); // più piccolo verso l'orizzonte
+    lights.push({
+      x: +x.toFixed(1),
+      y: +y.toFixed(1),
+      r: +((i === 0 ? 1.5 + w * 0.22 : 0.65 + rnd() * 1.05) * depth).toFixed(2),
+      o: +(i === 0 ? 0.95 : 0.35 + rnd() * 0.55).toFixed(2),
+      tw: i !== 0 && rnd() < 0.38,
+      dl: +(rnd() * 4).toFixed(2),
+      dur: +(1.8 + rnd() * 2.8).toFixed(2),
+    });
+  }
+}
+
+/* ---------- stelle sopra l'orizzonte ---------- */
+const stars = Array.from({ length: 26 }, () => ({
+  x: +(rnd() * W).toFixed(1),
+  y: +(6 + rnd() * Math.max(20, horizonApexY - 26)).toFixed(1),
+  r: +(0.5 + rnd() * 0.9).toFixed(2),
+  o: +(0.12 + rnd() * 0.38).toFixed(2),
+}));
+
+/* ---------- pin delle sedi ---------- */
+const pins = markers
+  .map((m) => {
+    if (!onCap(m.lng, m.lat)) return null;
     const p = projection([m.lng, m.lat]);
-    const visible = p && geoDistance([m.lng, m.lat], centerCoord) < Math.PI / 2;
-    return p && visible ? { ...m, i, x: p[0], y: p[1] } : null;
+    if (!p) return null;
+    const [x, y] = p as [number, number];
+    if (x < 24 || x > W - 24 || y < 14 || y > H - 10) return null;
+    return { ...m, x, y, size: 0.6 + 0.5 * (y / H) };
   })
   .filter((p): p is NonNullable<typeof p> => p !== null);
 ---
 
-<svg viewBox={`0 0 ${viewW} ${viewH}`} role="img" aria-label={label} class="globe-svg">
-  <defs>
-    <radialGradient id="fr-globe-sphere" cx="42%" cy="36%" r="62%">
-      <stop offset="0" stop-color="#1B3A63" />
-      <stop offset="0.6" stop-color="#0D2140" />
-      <stop offset="1" stop-color="#0A1B33" />
-    </radialGradient>
-    <!-- dissolvenza verso i bordi: la sfera si perde nello sfondo -->
-    <radialGradient id="fr-globe-fade" gradientUnits="userSpaceOnUse"
-      cx={translate[0]} cy={translate[1]} r={fadeR}>
-      <stop offset="0" stop-color="#fff" />
-      <stop offset="0.62" stop-color="#fff" />
-      <stop offset="1" stop-color="#000" />
-    </radialGradient>
-    <mask id="fr-globe-mask">
-      <rect x="0" y="0" width={viewW} height={viewH} fill="url(#fr-globe-fade)" />
-    </mask>
-  </defs>
+<figure class="globe-scene" data-globe-scene role="group" aria-label={label}>
+  <svg viewBox={`0 0 ${W} ${H}`} class="gs-svg" aria-hidden="true">
+    <defs>
+      <linearGradient id="gs-sea" x1="0" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+        <stop offset="0" stop-color="#030915" />
+        <stop offset="0.55" stop-color="#061020" />
+        <stop offset="1" stop-color="#0B1B33" />
+      </linearGradient>
+      <linearGradient id="gs-haze" gradientUnits="userSpaceOnUse"
+        x1="0" y1={horizonApexY + 190} x2="0" y2={horizonApexY}>
+        <stop offset="0" stop-color="#050B16" stop-opacity="0" />
+        <stop offset="1" stop-color="#050B16" stop-opacity="0.62" />
+      </linearGradient>
+      <filter id="gs-blur-lg" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="16" />
+      </filter>
+      <filter id="gs-blur-sm" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="5" />
+      </filter>
+      <clipPath id="gs-cap"><path d={spherePath} /></clipPath>
+    </defs>
 
-  <!-- corpo del globo, mascherato per sfumare ai bordi -->
-  <g mask="url(#fr-globe-mask)">
-    <circle cx={translate[0]} cy={translate[1]} r={scale} fill="url(#fr-globe-sphere)" />
-    <path d={graticulePath} fill="none" stroke="var(--gold)" stroke-width="0.7" stroke-opacity="0.22" />
-    <path d={landPath} fill="#2E5691" fill-opacity="0.95" stroke="#4A72B0" stroke-width="0.5" stroke-opacity="0.6" />
-  </g>
+    <!-- stelle nello spazio (lo sfondo resta quello della sezione) -->
+    <g class="gs-stars">
+      {stars.map((s) => (
+        <circle class="gs-star" cx={s.x} cy={s.y} r={s.r} fill="#EADFC4" opacity={s.o} />
+      ))}
+    </g>
 
-  <!-- punti città + etichetta (nome + tipologia) al passaggio del mouse -->
-  <g class="dots">
-    {dots.map((d) => (
-      <g class:list={['dot', { primary: d.primary }]} transform={`translate(${d.x} ${d.y})`}>
-        <title>{d.city}{d.typeLabel ? ` — ${d.typeLabel}` : ''}</title>
-        <circle class="dot-glow" r="14" />
-        <circle class="dot-ring" r={d.primary ? 8 : 6} />
-        <circle class="dot-core" r={d.primary ? 3.4 : 2.6} />
-        <g class="dot-label">
-          <text class="dl-city" y="26" text-anchor="middle">{d.city}</text>
-          {d.typeLabel && <text class="dl-type" y="41" text-anchor="middle">{d.typeLabel}</text>}
-        </g>
+    <!-- calotta visibile: mare, terre, confini, foschia d'orizzonte -->
+    <g clip-path="url(#gs-cap)">
+      <path d={spherePath} fill="url(#gs-sea)" />
+      <path d={landPath} fill="#1D3560" stroke="#4E7BB4" stroke-width="0.8" stroke-opacity="0.55" />
+      <path d={bordersPath} fill="none" stroke="#33578E" stroke-width="0.5" stroke-opacity="0.6" />
+      <!-- coste abitate: sottile rim dorato lungo i litorali -->
+      <path d={landPath} fill="none" stroke="#E9C97D" stroke-width="2.6" stroke-opacity="0.07" filter="url(#gs-blur-sm)" />
+      <path d={landPath} fill="none" stroke="#E9C97D" stroke-width="1" stroke-opacity="0.16" />
+
+      <!-- luci-città -->
+      <g class="gs-lights">
+        {lights.map((l) => (
+          <circle
+            class:list={['cl', { tw: l.tw }]}
+            cx={l.x} cy={l.y} r={l.r}
+            style={`--o:${l.o};--dl:${l.dl}s;--dur:${l.dur}s`}
+          />
+        ))}
       </g>
+
+      <rect x="0" y="0" width={W} height={H} fill="url(#gs-haze)" />
+    </g>
+
+    <!-- airglow: l'atmosfera dorata lungo l'orizzonte -->
+    <g class="gs-airglow">
+      <path d={spherePath} fill="none" stroke="#C2A35B" stroke-width="18" stroke-opacity="0.20" filter="url(#gs-blur-lg)" />
+      <path d={spherePath} fill="none" stroke="#E8C87A" stroke-width="6" stroke-opacity="0.45" filter="url(#gs-blur-sm)" />
+      <path d={spherePath} fill="none" stroke="#F2D794" stroke-width="1.4" stroke-opacity="0.85" />
+    </g>
+
+    <!-- firma Art Déco: piccolo rombo in basso a destra -->
+    <g class="gs-seal" transform={`translate(${W - 48} ${H - 44})`} opacity="0.4">
+      <path d="M0 -13 L10 0 L0 13 L-10 0 Z" fill="none" stroke="#C2A35B" stroke-width="1" />
+      <path d="M0 -5 L4 0 L0 5 L-4 0 Z" fill="#C2A35B" opacity="0.6" />
+    </g>
+  </svg>
+
+  <!-- pin cliccabili (HTML sopra la scena, posizioni proiettate) -->
+  <div class="gs-pins">
+    {pins.map((p) => (
+      <button
+        type="button"
+        class:list={['gpin', { primary: p.primary }]}
+        style={`left:${((p.x / W) * 100).toFixed(2)}%; top:${((p.y / H) * 100).toFixed(2)}%; --pz:${p.size.toFixed(2)}`}
+        data-city={p.city}
+        data-type={p.typeLabel}
+        data-country={p.country}
+        data-note={p.note ?? ''}
+        aria-label={`${p.city} — ${p.typeLabel}`}
+      >
+        <span class="gpin-halo" aria-hidden="true"></span>
+        <svg class="gpin-glyph" viewBox="0 0 24 32" aria-hidden="true">
+          <path class="gg-body" d="M12 31C12 31 2 18.8 2 11a10 10 0 1 1 20 0c0 7.8-10 20-10 20Z" />
+          <circle class="gg-hole" cx="12" cy="11" r="4" />
+        </svg>
+        <span class="gpin-label">{p.city}</span>
+      </button>
     ))}
-  </g>
-</svg>
+  </div>
 
-<style>
-  .globe-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  <!-- scheda della sede (aperta dal click sul pin) -->
+  <div class="gs-card" data-scene-card hidden>
+    <span class="gc-type" data-c-type></span>
+    <h3 class="gc-city" data-c-city></h3>
+    <p class="gc-country" data-c-country></p>
+    <p class="gc-note" data-c-note></p>
+    <a href={url('/contatti/')} class="gc-cta">Contatta questa sede →</a>
+  </div>
 
-  .dot { cursor: default; }
-  .dot-glow { fill: var(--gold-soft); opacity: 0.16; transition: opacity 0.3s ease, r 0.3s ease; }
-  .dot-ring { fill: none; stroke: var(--gold); stroke-width: 1; opacity: 0.55; }
-  .dot-core { fill: var(--gold-soft); }
-  .dot.primary .dot-core { fill: #FFFFFF; }
-  .dot.primary .dot-ring { stroke: var(--gold-soft); opacity: 0.8; }
-  .dot.primary .dot-glow { opacity: 0.24; }
-  .dot:hover .dot-glow { opacity: 0.4; }
+  <!-- dissolvenza dei bordi nello sfondo della sezione -->
+  <div class="gs-edge gs-edge-l" aria-hidden="true"></div>
+  <div class="gs-edge gs-edge-r" aria-hidden="true"></div>
+  <div class="gs-edge gs-edge-b" aria-hidden="true"></div>
+  <div class="gs-edge gs-edge-t" aria-hidden="true"></div>
 
-  /* etichetta: nascosta, appare all'hover del punto */
-  .dot-label { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
-  .dot:hover .dot-label { opacity: 1; }
-  .dl-city {
-    font-family: var(--disp); font-size: 15px; font-weight: 700;
-    fill: #FFFFFF; paint-order: stroke; stroke: #08152A; stroke-width: 4px;
-    stroke-linejoin: round;
+  <figcaption class="sr-only">
+    {pins.map((p) => `${p.city} (${p.typeLabel})`).join(', ')}.
+  </figcaption>
+</figure>
+
+<style define:vars={{ sceneBg: '#050B16' }}>
+  .globe-scene {
+    position: relative;
+    aspect-ratio: 1000 / 560;
+    width: 100%;
+    overflow: hidden;
   }
-  .dl-type {
+  .gs-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* luci-città */
+  .gs-lights .cl { fill: #E9C97D; opacity: var(--o); }
+  @media (prefers-reduced-motion: no-preference) {
+    .gs-lights .cl.tw {
+      animation: gs-twinkle var(--dur) ease-in-out var(--dl) infinite alternate;
+    }
+  }
+  @keyframes gs-twinkle {
+    from { opacity: var(--o); }
+    to { opacity: calc(var(--o) * 0.3); }
+  }
+
+  /* pin */
+  .gs-pins { position: absolute; inset: 0; pointer-events: none; }
+  .gpin {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    pointer-events: auto;
+    background: none; border: none; padding: 0;
+    cursor: pointer;
+    display: block;
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55));
+  }
+  .gpin-glyph {
+    display: block;
+    width: calc(24px * var(--pz, 1));
+    height: calc(32px * var(--pz, 1));
+    transition: transform 0.3s ease;
+    transform-origin: 50% 100%;
+  }
+  .gg-body { fill: #C9A85C; stroke: #6B531F; stroke-width: 0.8; }
+  .gg-hole { fill: #0A1322; }
+  .gpin.primary .gg-body { fill: #DCBE7C; }
+  .gpin:hover .gpin-glyph, .gpin.active .gpin-glyph { transform: scale(1.14); }
+  .gpin:focus-visible { outline: none; }
+  .gpin:focus-visible .gpin-glyph { transform: scale(1.14); }
+  .gpin:focus-visible .gpin-label { text-decoration: underline; text-underline-offset: 3px; }
+
+  .gpin-halo {
+    position: absolute;
+    left: 50%; bottom: -3px;
+    width: 14px; height: 5px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(233, 201, 125, 0.55), transparent 70%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .gpin::after {
+      content: "";
+      position: absolute;
+      left: 50%; bottom: -6px;
+      width: 12px; height: 12px;
+      border: 1px solid rgba(226, 190, 116, 0.55);
+      border-radius: 50%;
+      transform: translateX(-50%) scale(0.4);
+      animation: gs-pulse 2.8s ease-out infinite;
+    }
+    .gpin.primary::after { animation-duration: 2.2s; }
+  }
+  @keyframes gs-pulse {
+    0% { transform: translateX(-50%) scale(0.35) scaleY(0.45); opacity: 0.8; }
+    100% { transform: translateX(-50%) scale(2.1) scaleY(0.45); opacity: 0; }
+  }
+
+  .gpin-label {
+    position: absolute;
+    left: calc(100% + 8px);
+    top: calc(14% * var(--pz, 1) + 2px);
+    font-family: var(--disp);
+    font-size: calc(13.5px * clamp(0.8, var(--pz, 1), 1.05));
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #F5EFDF;
+    white-space: nowrap;
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.9);
+  }
+
+  /* scheda */
+  .gs-card {
+    position: absolute;
+    z-index: 4;
+    width: min(260px, 72vw);
+    transform: translate(-50%, -100%);
+    background: rgba(9, 20, 39, 0.96);
+    border: 1px solid rgba(194, 163, 91, 0.4);
+    border-left: 3px solid #C2A35B;
+    border-radius: 2px;
+    padding: 16px 18px 14px;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.55);
+  }
+  .gs-card[data-pos="below"] { transform: translate(-50%, 0); }
+  .gs-card[hidden] { display: none; }
+  .gc-type {
     font-family: var(--sans); font-size: 9.5px; font-weight: 700;
-    letter-spacing: 0.14em; text-transform: uppercase;
-    fill: var(--gold-soft); paint-order: stroke; stroke: #08152A; stroke-width: 3.5px;
-    stroke-linejoin: round;
+    letter-spacing: 0.2em; text-transform: uppercase; color: #D8BE84;
+  }
+  .gc-city { font-family: var(--disp); font-size: 22px; font-weight: 800; color: #FFFFFF; margin: 4px 0 0; }
+  .gc-country {
+    font-family: var(--sans); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: rgba(236, 229, 214, 0.55);
+    margin-top: 2px;
+  }
+  .gc-note { font-size: 14.5px; line-height: 1.5; color: rgba(236, 229, 214, 0.8); margin-top: 10px; }
+  .gc-cta {
+    display: inline-block; margin-top: 12px;
+    font-family: var(--sans); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase; color: #D8BE84;
+  }
+  .gc-cta:hover { color: #F2D794; }
+
+  /* bordi che si dissolvono nello sfondo della sezione */
+  .gs-edge { position: absolute; pointer-events: none; z-index: 3; }
+  .gs-edge-l { inset: 0 auto 0 0; width: 9%; background: linear-gradient(to right, var(--sceneBg), transparent); }
+  .gs-edge-r { inset: 0 0 0 auto; width: 9%; background: linear-gradient(to left, var(--sceneBg), transparent); }
+  .gs-edge-b { inset: auto 0 0 0; height: 16%; background: linear-gradient(to top, var(--sceneBg), transparent); }
+  .gs-edge-t { inset: 0 0 auto 0; height: 8%; background: linear-gradient(to bottom, var(--sceneBg), transparent); }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; padding: 0; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  @media (max-width: 700px) {
+    .gpin-label { font-size: 11px; letter-spacing: 0.1em; }
   }
 </style>
+
+<script>
+  import { gsap } from 'gsap';
+  import { ScrollTrigger } from 'gsap/ScrollTrigger';
+
+  gsap.registerPlugin(ScrollTrigger);
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  document.querySelectorAll<HTMLElement>('[data-globe-scene]').forEach((scene) => {
+    const pins = [...scene.querySelectorAll<HTMLButtonElement>('.gpin')];
+    const card = scene.querySelector<HTMLElement>('[data-scene-card]');
+
+    /* ingresso: i pin calano in sequenza quando la scena entra in vista */
+    if (!reduced && pins.length) {
+      gsap.from(pins, {
+        y: -16,
+        opacity: 0,
+        duration: 0.7,
+        ease: 'power2.out',
+        stagger: 0.12,
+        scrollTrigger: { trigger: scene, start: 'top 78%' },
+        clearProps: 'opacity,transform',
+      });
+    }
+
+    const closeCard = () => {
+      if (!card) return;
+      card.hidden = true;
+      pins.forEach((p) => p.classList.remove('active'));
+    };
+
+    pins.forEach((pin) => {
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!card) return;
+        const { city = '', type = '', country = '', note = '' } = pin.dataset;
+        (card.querySelector('[data-c-type]') as HTMLElement).textContent = type;
+        (card.querySelector('[data-c-city]') as HTMLElement).textContent = city;
+        (card.querySelector('[data-c-country]') as HTMLElement).textContent = country;
+        (card.querySelector('[data-c-note]') as HTMLElement).textContent = note;
+        pins.forEach((p) => p.classList.toggle('active', p === pin));
+
+        // posizionamento: sopra il pin, sotto se troppo vicino all'orizzonte
+        const px = parseFloat(pin.style.left);
+        const py = parseFloat(pin.style.top);
+        const above = py >= 40;
+        card.dataset.pos = above ? 'above' : 'below';
+        card.style.left = `${Math.min(Math.max(px, 16), 82)}%`;
+        card.style.top = above ? `${py - 9}%` : `${py + 4}%`;
+        card.hidden = false;
+        // NB: xPercent/yPercent perché GSAP rimpiazza il transform CSS
+        const yp = above ? -100 : 0;
+        if (!reduced) {
+          gsap.fromTo(
+            card,
+            { opacity: 0, xPercent: -50, yPercent: yp, y: above ? 10 : -10 },
+            { opacity: 1, xPercent: -50, yPercent: yp, y: 0, duration: 0.35, ease: 'power2.out' }
+          );
+        } else {
+          gsap.set(card, { xPercent: -50, yPercent: yp, y: 0, opacity: 1 });
+        }
+      });
+    });
+
+    // chiusura: click fuori o Esc
+    scene.addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement).closest('.gpin, [data-scene-card]')) closeCard();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeCard();
+    });
+  });
+</script>

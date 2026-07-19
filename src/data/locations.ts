@@ -15,6 +15,8 @@ export interface Location {
   /** Coordinate geografiche reali (per il globo) */
   lat: number;
   lng: number;
+  /** Riga breve per la scheda del pin sul globo */
+  note?: string;
 }
 
 /**
@@ -23,15 +25,15 @@ export interface Location {
  */
 export const locations: Location[] = [
   // Direzionali — il cuore operativo e strategico
-  { city: 'Torino', country: 'Italia', type: 'direzionale', primary: true, lat: 45.07, lng: 7.69 },
-  { city: 'Milano', country: 'Italia', type: 'direzionale', lat: 45.46, lng: 9.19 },
+  { city: 'Torino', country: 'Italia', type: 'direzionale', primary: true, lat: 45.07, lng: 7.69, note: 'Strategia & coordinamento' },
+  { city: 'Milano', country: 'Italia', type: 'direzionale', lat: 45.46, lng: 9.19, note: 'Finanza & capitali' },
   // Legale — centro societario e amministrativo
-  { city: 'Cracovia', country: 'Polonia', type: 'legale', lat: 50.06, lng: 19.94 },
+  { city: 'Cracovia', country: 'Polonia', type: 'legale', lat: 50.06, lng: 19.94, note: 'Centro societario & amministrativo' },
   // Rappresentanza — presìdi di relazione
-  { city: 'Roma', country: 'Italia', type: 'rappresentanza', lat: 41.9, lng: 12.5 },
-  { city: 'Dubai', country: 'Emirati Arabi Uniti', type: 'rappresentanza', lat: 25.2, lng: 55.27 },
-  { city: 'Montecarlo', country: 'Principato di Monaco', type: 'rappresentanza', lat: 43.74, lng: 7.42 },
-  { city: 'Vilnius', country: 'Lituania', type: 'rappresentanza', lat: 54.69, lng: 25.28 },
+  { city: 'Roma', country: 'Italia', type: 'rappresentanza', lat: 41.9, lng: 12.5, note: 'Relazioni istituzionali' },
+  { city: 'Dubai', country: 'Emirati Arabi Uniti', type: 'rappresentanza', lat: 25.2, lng: 55.27, note: 'Capitali & mercati emergenti' },
+  { city: 'Montecarlo', country: 'Principato di Monaco', type: 'rappresentanza', lat: 43.74, lng: 7.42, note: 'Gestione patrimoniale' },
+  { city: 'Vilnius', country: 'Lituania', type: 'rappresentanza', lat: 54.69, lng: 25.28, note: 'Innovazione & nuovi mercati' },
 ];
 
 export interface LocationGroup {

@@ -43,6 +43,7 @@ const markers = locations.map((l) => ({
   </div>
 
   <div class="wrap">
+    {!compact && (
     <div class="groups" data-reveal>
       {locationGroups.map((g) => (
         <article class="group">
@@ -60,6 +61,7 @@ const markers = locations.map((l) => ({
         </article>
       ))}
     </div>
+    )}
 
     {compact && (
       <div class="presence-more">

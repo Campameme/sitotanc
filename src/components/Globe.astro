@@ -15,7 +15,6 @@ import { geoPath, geoDistance } from 'd3-geo';
 import { feature, mesh } from 'topojson-client';
 import land110m from 'world-atlas/land-110m.json';
 import countries110m from 'world-atlas/countries-110m.json';
-import { url } from '../lib/url';
 
 interface Marker {
   lat: number;
@@ -267,7 +266,6 @@ const pins = markers
     <h3 class="gc-city" data-c-city></h3>
     <p class="gc-country" data-c-country></p>
     <p class="gc-note" data-c-note></p>
-    <a href={url('/contatti/')} class="gc-cta">Contatta questa sede →</a>
   </div>
 
   <!-- dissolvenza dei bordi nello sfondo della sezione -->
@@ -394,12 +392,6 @@ const pins = markers
     margin-top: 2px;
   }
   .gc-note { font-size: 14.5px; line-height: 1.5; color: rgba(236, 229, 214, 0.8); margin-top: 10px; }
-  .gc-cta {
-    display: inline-block; margin-top: 12px;
-    font-family: var(--sans); font-size: 11px; font-weight: 700;
-    letter-spacing: 0.12em; text-transform: uppercase; color: #D8BE84;
-  }
-  .gc-cta:hover { color: #F2D794; }
 
   /* bordi che si dissolvono nello sfondo della sezione */
   .gs-edge { position: absolute; pointer-events: none; z-index: 3; }
